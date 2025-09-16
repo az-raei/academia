@@ -1,1 +1,12 @@
+Mongodb installation guide:
 
+sudo apt update
+
+sudo apt install -y mongodb-org
+
+sudo systemctl start mongod
+sudo systemctl enable mongod
+
+mongosh
+
+(You can use sudo systemctl status mongod to check status)
