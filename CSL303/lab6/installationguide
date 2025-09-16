@@ -1,5 +1,6 @@
 Mongodb installation guide (Ubuntu 64-bit)
 
+bash
 sudo apt update
 
 sudo apt install -y mongodb-org
