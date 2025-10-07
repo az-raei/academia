@@ -1,0 +1,195 @@
+SQL query
+
+--4 Write a SQL query to find all students majoring in ’Computer Science’
+
+SELECT * FROM Students WHERE major = 'Computer Science';
+EXPLAIN QUERY PLAN SELECT * FROM Students WHERE major = 'Computer Science';
+
+--6 Complex Join Query: Write a SQL query to find the first name, last name, and course name for all students enrolled in a course from the ’Humanities’ department
+
+SELECT s.first_name, s.last_name, c.course_name 
+FROM Students s
+JOIN Enrollments e ON s.student_id = e.student_id
+JOIN Courses c ON e.course_id = c.course_id
+WHERE c.department = 'Humanities';
+
+EXPLAIN QUERY PLAN SELECT s.first_name, s.last_name, c.course_name
+FROM Students s
+JOIN Enrollments e ON s.student_id = e.student_id
+JOIN Courses c ON e.course_id = c.course_id
+WHERE c.department = 'Humanities';
+
+5
+
+result: 
+
+QUERY PLAN
+`--SCAN Students
+
+This tells us that SQLite scans the full table, and wherever the WHERE condition matches, it projects the tuple
+
+7
+
+result:
+
+QUERY PLAN
+|--SCAN e
+|--SEARCH s USING INTEGER PRIMARY KEY (rowid=?)
+`--SEARCH c USING INTEGER PRIMARY KEY (rowid=?)
+
+query plan shows that first SQLite looks through enrollments table and searches students table using primary key student_id to match them and then uses enrollments to again search through courses using primary key course id and match it. so all three tables are being scanned
+
+9
+
+result:
+
+QUERY PLAN
+`--SEARCH Students USING INDEX idx_students_major (major=?)
+
+using index improves performance because SQLite can use the index to directly locate relevant rows instead of scanning the entire table
+
+11
+
+QUERY PLAN
+|--SCAN e
+|--SEARCH s USING INTEGER PRIMARY KEY (rowid=?)
+`--SEARCH c USING INTEGER PRIMARY KEY (rowid=?)
+
+SQLite's optimizer determined that scanning Enrollments and using primary key lookups is more efficient for this particular query
+
+12, 13, 14, 15
+
+python script:
+
+import sqlite3
+import time
+import random
+
+DB_FILE = "university.db"
+
+def measure_select_performance():
+    QUERY = "SELECT * FROM Students WHERE major = 'Computer Science';"
+    ITERATIONS = 100
+    
+    con = sqlite3.connect(DB_FILE)
+    cur = con.cursor()
+    
+    # without index
+    try:
+        cur.execute("DROP INDEX idx_students_major")
+    except sqlite3.OperationalError:
+        pass
+    
+    total_time = 0
+    for _ in range(ITERATIONS):
+        start_time = time.perf_counter()
+        cur.execute(QUERY).fetchall()
+        end_time = time.perf_counter()
+        total_time += (end_time - start_time)
+    
+    avg_time_no_index = total_time / ITERATIONS
+    
+    # with index
+    cur.execute("CREATE INDEX idx_students_major ON Students(major)")
+    
+    total_time = 0
+    for _ in range(ITERATIONS):
+        start_time = time.perf_counter()
+        cur.execute(QUERY).fetchall()
+        end_time = time.perf_counter()
+        total_time += (end_time - start_time)
+    
+    avg_time_with_index = total_time / ITERATIONS
+    
+    con.close()
+    return avg_time_no_index, avg_time_with_index
+
+def generate_random_enrollment():
+    student_id = random.randint(1, 2000)
+    course_id = random.randint(1, 100)
+    grade = round(random.uniform(2.0, 4.0), 2)
+    return (student_id, course_id, grade)
+
+def measure_insert_performance():
+    con = sqlite3.connect(DB_FILE)
+    cur = con.cursor()
+    
+    cur.execute("SELECT MAX(enrollment_id) FROM Enrollments")
+    max_id = cur.fetchone()[0] or 0
+
+    # test data
+    enrollments = []
+    next_id = max_id + 1
+    for i in range(500):
+        student_id, course_id, grade = generate_random_enrollment()
+        enrollments.append((next_id + i, student_id, course_id, grade))
+    
+    # with indexes
+    try:
+        cur.execute("CREATE INDEX idx_enrollments_student_id ON Enrollments(student_id)")
+        cur.execute("CREATE INDEX idx_enrollments_course_id ON Enrollments(course_id)")
+    except sqlite3.OperationalError:
+        pass
+    
+    start_time = time.perf_counter()
+    cur.executemany("INSERT INTO Enrollments VALUES (?, ?, ?, ?)", enrollments)
+    con.commit()
+    end_time = time.perf_counter()
+    
+    time_with_indexes = end_time - start_time
+
+    cur.execute(f"DELETE FROM Enrollments WHERE enrollment_id > {max_id}")
+    con.commit()
+
+    # without indexes
+    try:
+        cur.execute("DROP INDEX idx_enrollments_student_id")
+        cur.execute("DROP INDEX idx_enrollments_course_id")
+    except sqlite3.OperationalError:
+        pass
+
+    start_time = time.perf_counter()
+    cur.executemany("INSERT INTO Enrollments VALUES (?, ?, ?, ?)", enrollments)
+    con.commit()
+    end_time = time.perf_counter()
+    
+    time_without_indexes = end_time - start_time
+    
+    # Clean up
+    cur.execute(f"DELETE FROM Enrollments WHERE enrollment_id > {max_id}")
+    con.commit()
+    
+    con.close()
+    return time_with_indexes, time_without_indexes
+
+if __name__ == "__main__":
+    select_no_index, select_with_index = measure_select_performance()
+    insert_with_index, insert_no_index = measure_insert_performance()
+    
+    print("FINAL RESULTS:")
+    print(f"SELECT - Without index: {select_no_index:.6f}s")
+    print(f"SELECT - With index:    {select_with_index:.6f}s")
+    print(f"INSERT - Without indexes: {insert_no_index:.6f}s")
+    print(f"INSERT - With indexes:    {insert_with_index:.6f}s")
+    
+    if select_no_index > 0:
+        select_improvement = ((select_no_index - select_with_index) / select_no_index) * 100
+        print(f"SELECT performance improvement with index: {select_improvement:.2f}%")
+    
+    if insert_no_index > 0:
+        insert_slowdown = ((insert_with_index - insert_no_index) / insert_no_index) * 100
+        print(f"INSERT performance slowdown with indexes: {insert_slowdown:.2f}%")
+
+output:
+
+12 SELECT - Without index: 0.003051s
+13 SELECT - With index:    0.003166s
+14 INSERT - Without indexes: 0.006338s
+15 INSERT - With indexes:    0.010265s
+
+SELECT performance improvement with index: -3.75%
+INSERT performance slowdown with indexes: 61.96%
+
+observations:
+
+index major column degraded performance, because all students are from computer science department, thereby making full table scan more efficient than index lookups. without index, full table scan reads all 2000 tuples directly. with index, database reads the index of all 2000 student ids and then the actual table data of each of those 2000 students. insert operation shows greater performance degradation with indexes. it shows the significant overhead indexes impose on write operations because database must update both table data along with all associated index structures. without indexes, it simply inserts into table. with index, it has to insert into table and update all index structures 
